@@ -225,6 +225,7 @@ export interface LLMProvider {
    */
   streamChat(params: StreamChatParams): ReadableStream<string>;
   interruptSession?(sessionId: string): Promise<boolean>;
+  getQuotaSummary?(sessionId: string): Promise<string | null>;
 }
 
 // ── Host Interface: Permission Gateway ───────────────────────

@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  extractQuotaNotices,
   parseErrorEventData,
   resolvePersistedSdkSessionId,
 } from '../../lib/bridge/conversation-engine.js';
@@ -38,5 +39,14 @@ describe('conversation-engine helpers', () => {
       message: 'Session not found',
       code: 'resume_invalid',
     });
+  });
+
+  it('extracts quota notices from status payloads', () => {
+    assert.deepStrictEqual(
+      extractQuotaNotices({
+        quota_notices: ['Session quota above 70%', '', 123, 'Weekly quota above 70%'],
+      }),
+      ['Session quota above 70%', 'Weekly quota above 70%'],
+    );
   });
 });

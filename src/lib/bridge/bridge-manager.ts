@@ -787,6 +787,14 @@ async function handleMessage(
         }
       } catch { /* best effort */ }
     }
+    if (result.quotaNotices.length > 0) {
+      await deliver(adapter, {
+        address: msg.address,
+        text: result.quotaNotices.join('\n\n'),
+        parseMode: 'plain',
+        replyToMessageId: msg.messageId,
+      });
+    }
   } finally {
     // Clean up preview state
     if (previewState) {
@@ -820,7 +828,7 @@ async function handleCommand(
   msg: InboundMessage,
   text: string,
 ): Promise<void> {
-  const { store } = getBridgeContext();
+  const { store, llm } = getBridgeContext();
 
   // Extract command and args (handle /command@botname format)
   const parts = text.split(/\s+/);
@@ -848,6 +856,7 @@ async function handleCommand(
   }
 
   let response = '';
+  let responseParseMode: 'HTML' | 'Markdown' | 'plain' = 'HTML';
 
   switch (command) {
     case '/start':
@@ -862,6 +871,7 @@ async function handleCommand(
         '/cwd /path - Change working directory',
         '/mode plan|code|ask - Change mode',
         '/status - Show current status',
+        '/quota - Show quota status when supported',
         '/sessions - List recent sessions',
         '/stop - Stop current session',
         '/perm allow|allow_session|deny &lt;id&gt; - Respond to permission',
@@ -961,6 +971,18 @@ async function handleCommand(
       break;
     }
 
+    case '/quota': {
+      responseParseMode = 'plain';
+      const binding = router.resolve(msg.address);
+      if (typeof llm.getQuotaSummary !== 'function') {
+        response = 'Quota status is not supported by the current host.';
+        break;
+      }
+      response = await llm.getQuotaSummary(binding.codepilotSessionId)
+        || 'Quota status is not available for this session yet.';
+      break;
+    }
+
     case '/stop': {
       const binding = router.resolve(msg.address);
       const stopResult = await stopActiveTask(binding.codepilotSessionId);
@@ -999,6 +1021,7 @@ async function handleCommand(
         '/cwd /path - Change working directory',
         '/mode plan|code|ask - Change mode',
         '/status - Show current status',
+        '/quota - Show quota status when supported',
         '/sessions - List recent sessions',
         '/stop - Stop current session',
         '/perm allow|allow_session|deny &lt;id&gt; - Respond to permission request',
@@ -1015,7 +1038,7 @@ async function handleCommand(
     await deliver(adapter, {
       address: msg.address,
       text: response,
-      parseMode: 'HTML',
+      parseMode: responseParseMode,
       replyToMessageId: msg.messageId,
     });
   }

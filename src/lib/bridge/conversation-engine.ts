@@ -51,6 +51,7 @@ export interface ConversationResult {
   hasError: boolean;
   errorMessage: string;
   errorCode: string | null;
+  quotaNotices: string[];
   /** Permission request events that were forwarded during streaming */
   permissionRequests: PermissionRequestInfo[];
   /** SDK session ID captured from status/result events, for session resume */
@@ -86,6 +87,19 @@ export function parseErrorEventData(data: string): { message: string; code: stri
   return { message: data || 'Unknown error', code: null };
 }
 
+export function extractQuotaNotices(statusData: unknown): string[] {
+  if (!statusData || typeof statusData !== 'object') {
+    return [];
+  }
+
+  const maybeNotices = (statusData as { quota_notices?: unknown }).quota_notices;
+  if (!Array.isArray(maybeNotices)) {
+    return [];
+  }
+
+  return maybeNotices.filter((notice): notice is string => typeof notice === 'string' && notice.trim().length > 0);
+}
+
 /**
  * Process an inbound message: send to Claude, consume the response stream,
  * save to DB, and return the result.
@@ -112,6 +126,7 @@ export async function processMessage(
       hasError: true,
       errorMessage: 'Session is busy processing another request',
       errorCode: null,
+      quotaNotices: [],
       permissionRequests: [],
       sdkSessionId: null,
     };
@@ -250,6 +265,8 @@ async function consumeStream(
   let hasError = false;
   let errorMessage = '';
   let errorCode: string | null = null;
+  const quotaNotices: string[] = [];
+  const seenQuotaNotices = new Set<string>();
   const seenToolResultIds = new Set<string>();
   const permissionRequests: PermissionRequestInfo[] = [];
   let capturedSdkSessionId: string | null = null;
@@ -361,6 +378,11 @@ async function consumeStream(
               if (statusData.model) {
                 store.updateSessionModel(sessionId, statusData.model);
               }
+              for (const notice of extractQuotaNotices(statusData)) {
+                if (seenQuotaNotices.has(notice)) continue;
+                seenQuotaNotices.add(notice);
+                quotaNotices.push(notice);
+              }
             } catch { /* skip */ }
             break;
           }
@@ -438,6 +460,7 @@ async function consumeStream(
       hasError,
       errorMessage,
       errorCode,
+      quotaNotices,
       permissionRequests,
       sdkSessionId: capturedSdkSessionId,
     };
@@ -471,6 +494,7 @@ async function consumeStream(
       hasError: true,
       errorMessage: isAbort ? 'Task stopped by user' : (e instanceof Error ? e.message : 'Stream consumption error'),
       errorCode: null,
+      quotaNotices,
       permissionRequests,
       sdkSessionId: capturedSdkSessionId,
     };

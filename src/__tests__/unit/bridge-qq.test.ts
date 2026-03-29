@@ -945,7 +945,7 @@ describe('bridge-manager - computeSdkSessionUpdate', () => {
 
   it('preserves sdkSessionId on recoverable errors', async () => {
     const { computeSdkSessionUpdate } = await import('../../lib/bridge/bridge-manager');
-    const result = computeSdkSessionUpdate('new-sdk-123', true, 'temporary_failure', 'Temporary failure');
+    const result = computeSdkSessionUpdate('new-sdk-123', true, 'quota', 'Quota exceeded');
     assert.equal(result, 'new-sdk-123');
   });
 });
