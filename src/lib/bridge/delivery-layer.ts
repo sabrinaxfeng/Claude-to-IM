@@ -14,20 +14,13 @@ import type { TelegramChunk } from './markdown/telegram.js';
 import { PLATFORM_LIMITS as limits } from './types.js';
 import type { BaseChannelAdapter } from './channel-adapter.js';
 import { getBridgeContext } from './context.js';
-import { ChatRateLimiter } from './security/rate-limiter.js';
+import { waitForChatSendSlot } from './outbound-rate-limiter.js';
 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
 const JITTER_MAX_MS = 500;
 /** Delay between sending multiple chunks to avoid rate limits. */
 const INTER_CHUNK_DELAY_MS = 300;
-
-/** Shared rate limiter instance (20 messages/minute per chat). */
-const rateLimiter = new ChatRateLimiter();
-
-// Periodically clean up idle rate limiter buckets (every 5 minutes).
-// unref() so the timer doesn't prevent Node.js process exit (e.g. in tests).
-setInterval(() => { rateLimiter.cleanup(); }, 5 * 60_000).unref();
 
 /**
  * Split text into chunks that fit within a platform's message size limit.
@@ -48,7 +41,10 @@ function chunkText(text: string, maxLength: number): string[] {
     // Try to split at a newline within the limit
     let splitIdx = remaining.lastIndexOf('\n', maxLength);
     if (splitIdx <= 0 || splitIdx < maxLength * 0.5) {
-      splitIdx = maxLength;
+      const whitespaceIdx = remaining.slice(0, maxLength + 1).search(/\s+[^\s]*$/);
+      splitIdx = whitespaceIdx > 0 && whitespaceIdx >= maxLength * 0.6
+        ? whitespaceIdx
+        : maxLength;
     }
 
     chunks.push(remaining.slice(0, splitIdx));
@@ -173,7 +169,7 @@ export async function deliver(
 
   for (let i = 0; i < chunks.length; i++) {
     // Rate limit: wait if this chat is sending too fast
-    await rateLimiter.acquire(message.address.chatId);
+    await waitForChatSendSlot(message.address.chatId);
 
     // Inter-chunk delay to avoid hitting rate limits on multi-chunk messages
     if (i > 0) {
@@ -284,7 +280,7 @@ export async function deliverRendered(
   adapter: BaseChannelAdapter,
   address: ChannelAddress,
   chunks: TelegramChunk[],
-  opts?: { sessionId?: string; dedupKey?: string; replyToMessageId?: string },
+  opts?: { sessionId?: string; dedupKey?: string; replyToMessageId?: string; draftId?: number },
 ): Promise<SendResult> {
   const { store } = getBridgeContext();
 
@@ -302,7 +298,7 @@ export async function deliverRendered(
   let failedCount = 0;
 
   for (let i = 0; i < chunks.length; i++) {
-    await rateLimiter.acquire(address.chatId);
+    await waitForChatSendSlot(address.chatId);
     if (i > 0) {
       await new Promise(r => setTimeout(r, INTER_CHUNK_DELAY_MS));
     }
@@ -313,6 +309,7 @@ export async function deliverRendered(
       text: chunk.html,
       parseMode: 'HTML',
       replyToMessageId: opts?.replyToMessageId,
+      draftId: i === 0 ? opts?.draftId : undefined,
     };
 
     // Try HTML first, fall back to plain text on parse error

@@ -109,6 +109,18 @@ function renderTelegramHtml(ir: MarkdownIR): string {
   });
 }
 
+function findNaturalSplitIndex(text: string, limit: number): number {
+  const newlineIdx = text.lastIndexOf('\n', limit);
+  if (newlineIdx > 0 && newlineIdx >= limit * 0.5) {
+    return newlineIdx;
+  }
+  const whitespaceIdx = text.slice(0, limit + 1).search(/\s+[^\s]*$/);
+  if (whitespaceIdx > 0 && whitespaceIdx >= limit * 0.6) {
+    return whitespaceIdx;
+  }
+  return limit;
+}
+
 // ── File reference wrapping (post-processing) ─────────────────
 
 function escapeRegex(str: string): string {
@@ -259,7 +271,11 @@ function splitMarkdownIRPreserveWhitespace(ir: MarkdownIR, limit: number): Markd
   const chunks: MarkdownIR[] = [];
   let cursor = 0;
   while (cursor < ir.text.length) {
-    const end = Math.min(ir.text.length, cursor + normalizedLimit);
+    const remaining = ir.text.slice(cursor);
+    const localEnd = remaining.length <= normalizedLimit
+      ? remaining.length
+      : findNaturalSplitIndex(remaining, normalizedLimit);
+    const end = Math.min(ir.text.length, cursor + localEnd);
     chunks.push({
       text: ir.text.slice(cursor, end),
       styles: sliceStyleSpans(ir.styles, cursor, end),

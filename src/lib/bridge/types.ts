@@ -68,6 +68,8 @@ export interface OutboundMessage {
   inlineButtons?: InlineButton[][];
   /** If replying to a specific message */
   replyToMessageId?: string;
+  /** Telegram draft_id — when set, sendMessage replaces the streaming preview draft. */
+  draftId?: number;
 }
 
 /** Inline keyboard button for permission prompts */

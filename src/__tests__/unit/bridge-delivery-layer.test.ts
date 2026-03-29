@@ -12,7 +12,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { initBridgeContext } from '../../lib/bridge/context';
-import { deliver } from '../../lib/bridge/delivery-layer';
+import { deliver, deliverRendered } from '../../lib/bridge/delivery-layer';
 import type { BaseChannelAdapter } from '../../lib/bridge/channel-adapter';
 import type { BridgeStore, LLMProvider, PermissionGateway, LifecycleHooks } from '../../lib/bridge/host';
 import type { OutboundMessage, SendResult } from '../../lib/bridge/types';
@@ -202,5 +202,28 @@ describe('delivery-layer', () => {
 
     assert.equal(result.ok, false);
     assert.ok(result.error);
+  });
+
+  it('passes draftId only on the first rendered telegram chunk', async () => {
+    const draftIds: Array<number | undefined> = [];
+    const adapter = createMockAdapter({
+      sendFn: async (msg) => {
+        draftIds.push(msg.draftId);
+        return { ok: true, messageId: `msg-${draftIds.length}` };
+      },
+    });
+
+    const result = await deliverRendered(
+      adapter,
+      { channelType: 'telegram', chatId: '123' },
+      [
+        { html: '<b>one</b>', text: 'one' },
+        { html: '<b>two</b>', text: 'two' },
+      ],
+      { draftId: 42 },
+    );
+
+    assert.ok(result.ok);
+    assert.deepStrictEqual(draftIds, [42, undefined]);
   });
 });

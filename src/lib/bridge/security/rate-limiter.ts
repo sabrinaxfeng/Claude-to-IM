@@ -16,6 +16,7 @@ interface BucketEntry {
 
 export class ChatRateLimiter {
   private buckets = new Map<string, BucketEntry>();
+  private chains = new Map<string, Promise<void>>();
   private maxMessages: number;
   private windowMs: number;
 
@@ -29,26 +30,49 @@ export class ChatRateLimiter {
    * Registers the send timestamp upon returning.
    */
   async acquire(chatId: string): Promise<void> {
+    const previous = this.chains.get(chatId) || Promise.resolve();
+    const current = previous.then(async () => {
+      const now = Date.now();
+      const bucket = this.getOrCreate(chatId);
+      this.pruneOld(bucket, now);
+
+      if (bucket.timestamps.length >= this.maxMessages) {
+        const oldest = bucket.timestamps[0];
+        const waitMs = oldest + this.windowMs - now;
+        if (waitMs > 0) {
+          await new Promise<void>(r => setTimeout(r, waitMs));
+        }
+      }
+
+      const afterWait = Date.now();
+      this.pruneOld(bucket, afterWait);
+      bucket.timestamps.push(afterWait);
+    });
+
+    const queued = current.catch(() => {});
+    this.chains.set(chatId, queued);
+    try {
+      await current;
+    } finally {
+      if (this.chains.get(chatId) === queued) {
+        this.chains.delete(chatId);
+      }
+    }
+  }
+
+  /**
+   * Check whether a chat can send immediately without waiting.
+   * Does not consume a send slot; callers should use this for best-effort
+   * traffic like previews and still record actual sends via acquire().
+   */
+  canSendImmediately(chatId: string): boolean {
+    if (this.chains.has(chatId)) {
+      return false;
+    }
     const now = Date.now();
     const bucket = this.getOrCreate(chatId);
     this.pruneOld(bucket, now);
-
-    if (bucket.timestamps.length < this.maxMessages) {
-      bucket.timestamps.push(now);
-      return;
-    }
-
-    // Window is full — wait until the oldest entry expires
-    const oldest = bucket.timestamps[0];
-    const waitMs = oldest + this.windowMs - now;
-    if (waitMs > 0) {
-      await new Promise<void>(r => setTimeout(r, waitMs));
-    }
-
-    // Prune again after waiting and record
-    const afterWait = Date.now();
-    this.pruneOld(bucket, afterWait);
-    bucket.timestamps.push(afterWait);
+    return bucket.timestamps.length < this.maxMessages;
   }
 
   /**

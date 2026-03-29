@@ -16,6 +16,7 @@ import type {
 import type { FileAttachment } from '../types.js';
 import { BaseChannelAdapter, registerAdapterFactory } from '../channel-adapter.js';
 import { getBridgeContext } from '../context.js';
+import { canSendChatImmediately } from '../outbound-rate-limiter.js';
 import { callTelegramApi, sendMessageDraft } from './telegram-utils.js';
 import {
   isImageEnabled,
@@ -191,6 +192,10 @@ export class TelegramAdapter extends BaseChannelAdapter {
       params.reply_to_message_id = message.replyToMessageId;
     }
 
+    if (message.draftId) {
+      params.draft_id = message.draftId;
+    }
+
     // Inline keyboard buttons
     if (message.inlineButtons && message.inlineButtons.length > 0) {
       params.reply_markup = {
@@ -304,6 +309,7 @@ export class TelegramAdapter extends BaseChannelAdapter {
   async sendPreview(chatId: string, text: string, draftId: number): Promise<'sent' | 'skip' | 'degrade'> {
     const token = this.botToken;
     if (!token) return 'skip';
+    if (!canSendChatImmediately(chatId)) return 'skip';
 
     const result = await sendMessageDraft(token, chatId, text, draftId);
     if (result.ok) return 'sent';

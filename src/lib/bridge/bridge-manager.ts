@@ -115,11 +115,12 @@ async function deliverResponse(
   responseText: string,
   sessionId: string,
   replyToMessageId?: string,
+  draftId?: number,
 ): Promise<SendResult> {
   if (adapter.channelType === 'telegram') {
     const chunks = markdownToTelegramChunks(responseText, 4096);
     if (chunks.length > 0) {
-      return deliverRendered(adapter, address, chunks, { sessionId, replyToMessageId });
+      return deliverRendered(adapter, address, chunks, { sessionId, replyToMessageId, draftId });
     }
     return { ok: true };
   }
@@ -725,7 +726,14 @@ async function handleMessage(
     // Skip if streaming card was finalized (content already in card).
     if (result.responseText) {
       if (!cardFinalized) {
-        await deliverResponse(adapter, msg.address, result.responseText, binding.codepilotSessionId, msg.messageId);
+        await deliverResponse(
+          adapter,
+          msg.address,
+          result.responseText,
+          binding.codepilotSessionId,
+          msg.messageId,
+          previewState?.draftId,
+        );
       }
     } else if (result.hasError) {
       const errorResponse: OutboundMessage = {

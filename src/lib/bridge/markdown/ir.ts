@@ -745,7 +745,14 @@ function chunkText(text: string, limit: number): string[] {
   while (remaining.length > 0) {
     if (remaining.length <= limit) { chunks.push(remaining); break; }
     let splitIdx = remaining.lastIndexOf('\n', limit);
-    if (splitIdx <= 0 || splitIdx < limit * 0.5) splitIdx = limit;
+    if (splitIdx <= 0 || splitIdx < limit * 0.5) {
+      const whitespaceIdx = remaining.slice(0, limit + 1).search(/\s+[^\s]*$/);
+      if (whitespaceIdx > 0 && whitespaceIdx >= limit * 0.6) {
+        splitIdx = whitespaceIdx;
+      } else {
+        splitIdx = limit;
+      }
+    }
     chunks.push(remaining.slice(0, splitIdx));
     remaining = remaining.slice(splitIdx).replace(/^\n/, '');
   }

@@ -112,7 +112,10 @@ export function splitMessage(text: string, maxLength: number): string[] {
 
     let splitIdx = remaining.lastIndexOf('\n', maxLength);
     if (splitIdx <= 0 || splitIdx < maxLength * 0.5) {
-      splitIdx = maxLength;
+      const whitespaceIdx = remaining.slice(0, maxLength + 1).search(/\s+[^\s]*$/);
+      splitIdx = whitespaceIdx > 0 && whitespaceIdx >= maxLength * 0.6
+        ? whitespaceIdx
+        : maxLength;
     }
 
     chunks.push(remaining.slice(0, splitIdx));
