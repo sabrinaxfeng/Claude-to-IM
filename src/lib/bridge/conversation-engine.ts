@@ -50,10 +50,40 @@ export interface ConversationResult {
   tokenUsage: TokenUsage | null;
   hasError: boolean;
   errorMessage: string;
+  errorCode: string | null;
   /** Permission request events that were forwarded during streaming */
   permissionRequests: PermissionRequestInfo[];
   /** SDK session ID captured from status/result events, for session resume */
   sdkSessionId: string | null;
+}
+
+export function resolvePersistedSdkSessionId(
+  binding: ChannelBinding,
+  session: { sdk_session_id?: unknown } | null | undefined,
+): string | undefined {
+  if (binding.sdkSessionId) {
+    return binding.sdkSessionId;
+  }
+  const fromSession = session?.sdk_session_id;
+  if (typeof fromSession === 'string' && fromSession) {
+    return fromSession;
+  }
+  return undefined;
+}
+
+export function parseErrorEventData(data: string): { message: string; code: string | null } {
+  try {
+    const parsed = JSON.parse(data) as { message?: unknown; code?: unknown };
+    if (typeof parsed.message === 'string') {
+      return {
+        message: parsed.message,
+        code: typeof parsed.code === 'string' ? parsed.code : null,
+      };
+    }
+  } catch {
+    // Plain string payload.
+  }
+  return { message: data || 'Unknown error', code: null };
 }
 
 /**
@@ -81,6 +111,7 @@ export async function processMessage(
       tokenUsage: null,
       hasError: true,
       errorMessage: 'Session is busy processing another request',
+      errorCode: null,
       permissionRequests: [],
       sdkSessionId: null,
     };
@@ -96,6 +127,12 @@ export async function processMessage(
   try {
     // Resolve session early — needed for workingDirectory and provider resolution
     const session = store.getSession(sessionId);
+    const persistedSdkSessionId = resolvePersistedSdkSessionId(binding, session);
+    if (!binding.sdkSessionId && binding.id && persistedSdkSessionId) {
+      try {
+        store.updateChannelBinding(binding.id, { sdkSessionId: persistedSdkSessionId });
+      } catch { /* best effort */ }
+    }
 
     // Save user message — persist file attachments to disk using the same
     // <!--files:JSON--> format as the desktop chat route, so the UI can render them.
@@ -167,7 +204,7 @@ export async function processMessage(
     const stream = llm.streamChat({
       prompt: text,
       sessionId,
-      sdkSessionId: binding.sdkSessionId || undefined,
+      sdkSessionId: persistedSdkSessionId,
       model: effectiveModel,
       systemPrompt: session?.system_prompt || undefined,
       workingDirectory: binding.workingDirectory || session?.working_directory || undefined,
@@ -212,6 +249,7 @@ async function consumeStream(
   let tokenUsage: TokenUsage | null = null;
   let hasError = false;
   let errorMessage = '';
+  let errorCode: string | null = null;
   const seenToolResultIds = new Set<string>();
   const permissionRequests: PermissionRequestInfo[] = [];
   let capturedSdkSessionId: string | null = null;
@@ -339,7 +377,11 @@ async function consumeStream(
 
           case 'error':
             hasError = true;
-            errorMessage = event.data || 'Unknown error';
+            {
+              const parsed = parseErrorEventData(event.data);
+              errorMessage = parsed.message;
+              errorCode = parsed.code;
+            }
             break;
 
           case 'result': {
@@ -395,6 +437,7 @@ async function consumeStream(
       tokenUsage,
       hasError,
       errorMessage,
+      errorCode,
       permissionRequests,
       sdkSessionId: capturedSdkSessionId,
     };
@@ -427,6 +470,7 @@ async function consumeStream(
       tokenUsage,
       hasError: true,
       errorMessage: isAbort ? 'Task stopped by user' : (e instanceof Error ? e.message : 'Stream consumption error'),
+      errorCode: null,
       permissionRequests,
       sdkSessionId: capturedSdkSessionId,
     };

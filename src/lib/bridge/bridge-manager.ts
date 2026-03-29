@@ -194,6 +194,32 @@ function getState(): BridgeManagerState {
   return g[GLOBAL_KEY];
 }
 
+export async function stopActiveTask(
+  sessionId: string,
+): Promise<'interrupted' | 'aborted' | 'idle'> {
+  const state = getState();
+  const taskAbort = state.activeTasks.get(sessionId);
+  if (!taskAbort) {
+    return 'idle';
+  }
+
+  const { llm } = getBridgeContext();
+  if (typeof llm.interruptSession === 'function') {
+    try {
+      const interrupted = await llm.interruptSession(sessionId);
+      if (interrupted) {
+        return 'interrupted';
+      }
+    } catch (err) {
+      console.warn(`[bridge-manager] Native interrupt failed for session ${sessionId}:`, err);
+    }
+  }
+
+  taskAbort.abort();
+  state.activeTasks.delete(sessionId);
+  return 'aborted';
+}
+
 /**
  * Process a function with per-session serialization.
  * Different sessions run concurrently; same-session requests are serialized.
@@ -750,7 +776,12 @@ async function handleMessage(
     // stale ID so the next message starts fresh instead of retrying a broken resume.
     if (binding.id) {
       try {
-        const update = computeSdkSessionUpdate(result.sdkSessionId, result.hasError);
+        const update = computeSdkSessionUpdate(
+          result.sdkSessionId,
+          result.hasError,
+          result.errorCode,
+          result.errorMessage,
+        );
         if (update !== null) {
           store.updateChannelBinding(binding.id, { sdkSessionId: update });
         }
@@ -841,12 +872,7 @@ async function handleCommand(
     case '/new': {
       // Abort any running task on the current session before creating a new one
       const oldBinding = router.resolve(msg.address);
-      const st = getState();
-      const oldTask = st.activeTasks.get(oldBinding.codepilotSessionId);
-      if (oldTask) {
-        oldTask.abort();
-        st.activeTasks.delete(oldBinding.codepilotSessionId);
-      }
+      await stopActiveTask(oldBinding.codepilotSessionId);
 
       let workDir: string | undefined;
       if (args) {
@@ -937,15 +963,10 @@ async function handleCommand(
 
     case '/stop': {
       const binding = router.resolve(msg.address);
-      const st = getState();
-      const taskAbort = st.activeTasks.get(binding.codepilotSessionId);
-      if (taskAbort) {
-        taskAbort.abort();
-        st.activeTasks.delete(binding.codepilotSessionId);
-        response = 'Stopping current task...';
-      } else {
-        response = 'No task is currently running.';
-      }
+      const stopResult = await stopActiveTask(binding.codepilotSessionId);
+      response = stopResult === 'idle'
+        ? 'No task is currently running.'
+        : 'Stopping current task...';
       break;
     }
 
@@ -1014,18 +1035,34 @@ async function handleCommand(
 export function computeSdkSessionUpdate(
   sdkSessionId: string | null | undefined,
   hasError: boolean,
+  errorCode?: string | null,
+  errorMessage?: string | null,
 ): string | null {
-  if (sdkSessionId && !hasError) {
-    return sdkSessionId;
-  }
-  if (hasError) {
+  if (hasError && shouldResetSdkSession(errorCode, errorMessage)) {
     return '';
   }
+  if (sdkSessionId) {
+    return sdkSessionId;
+  }
   return null;
+}
+
+function shouldResetSdkSession(errorCode: string | null | undefined, errorMessage: string | null | undefined): boolean {
+  if (errorCode === 'resume_invalid') {
+    return true;
+  }
+  const lower = (errorMessage || '').toLowerCase();
+  return (
+    lower.includes('resuming session with different model')
+    || lower.includes('no such session')
+    || lower.includes('session not found')
+    || lower.includes('invalid session')
+    || (lower.includes('resume') && lower.includes('session'))
+  );
 }
 
 // ── Test-only export ─────────────────────────────────────────
 // Exposed so integration tests can exercise handleMessage directly
 // without wiring up the full adapter loop.
 /** @internal */
-export const _testOnly = { handleMessage };
+export const _testOnly = { handleMessage, getState };

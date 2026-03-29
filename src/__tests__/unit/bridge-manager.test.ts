@@ -131,6 +131,33 @@ describe('bridge-manager lifecycle', () => {
     assert.equal(status.running, false);
     assert.equal(status.adapters.length, 0);
   });
+
+  it('stopActiveTask prefers provider-native interrupt when available', async () => {
+    const store = createMinimalStore({ remote_bridge_enabled: 'false' });
+    let interruptedSessionId: string | null = null;
+    initBridgeContext({
+      store,
+      llm: {
+        streamChat: () => new ReadableStream(),
+        interruptSession: async (sessionId: string) => {
+          interruptedSessionId = sessionId;
+          return true;
+        },
+      },
+      permissions: { resolvePendingPermission: () => false },
+      lifecycle: {},
+    });
+
+    const { stopActiveTask, _testOnly } = await import('../../lib/bridge/bridge-manager');
+    const state = _testOnly.getState();
+    const abortController = new AbortController();
+    state.activeTasks.set('session-1', abortController);
+
+    const result = await stopActiveTask('session-1');
+    assert.equal(result, 'interrupted');
+    assert.equal(interruptedSessionId, 'session-1');
+    assert.equal(abortController.signal.aborted, false);
+  });
 });
 
 function createMinimalStore(settings: Record<string, string> = {}): BridgeStore {

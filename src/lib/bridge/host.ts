@@ -72,6 +72,7 @@ export interface BridgeSession {
   model: string;
   system_prompt?: string;
   provider_id?: string;
+  sdk_session_id?: string;
 }
 
 /** Minimal message object returned by the store. */
@@ -223,6 +224,7 @@ export interface LLMProvider {
    * Returns a ReadableStream of SSE-formatted strings.
    */
   streamChat(params: StreamChatParams): ReadableStream<string>;
+  interruptSession?(sessionId: string): Promise<boolean>;
 }
 
 // ── Host Interface: Permission Gateway ───────────────────────

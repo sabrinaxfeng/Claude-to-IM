@@ -921,13 +921,13 @@ describe('bridge-manager - computeSdkSessionUpdate', () => {
 
   it('clears sdkSessionId on error even when sdkSessionId is present', async () => {
     const { computeSdkSessionUpdate } = await import('../../lib/bridge/bridge-manager');
-    const result = computeSdkSessionUpdate('new-sdk-123', true);
+    const result = computeSdkSessionUpdate('new-sdk-123', true, 'resume_invalid', 'Session not found');
     assert.equal(result, '', 'Error with SDK ID: should clear');
   });
 
   it('clears sdkSessionId on error even without sdkSessionId', async () => {
     const { computeSdkSessionUpdate } = await import('../../lib/bridge/bridge-manager');
-    const result = computeSdkSessionUpdate(null, true);
+    const result = computeSdkSessionUpdate(null, true, 'resume_invalid', 'Session not found');
     assert.equal(result, '', 'Error without SDK ID: should clear');
   });
 
@@ -941,5 +941,11 @@ describe('bridge-manager - computeSdkSessionUpdate', () => {
     const { computeSdkSessionUpdate } = await import('../../lib/bridge/bridge-manager');
     const result = computeSdkSessionUpdate('', false);
     assert.equal(result, null, 'Empty SDK ID without error: no update needed');
+  });
+
+  it('preserves sdkSessionId on recoverable errors', async () => {
+    const { computeSdkSessionUpdate } = await import('../../lib/bridge/bridge-manager');
+    const result = computeSdkSessionUpdate('new-sdk-123', true, 'temporary_failure', 'Temporary failure');
+    assert.equal(result, 'new-sdk-123');
   });
 });
